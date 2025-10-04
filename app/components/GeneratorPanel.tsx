@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { GeneratedDeck } from '@/lib/types';
+import { analyzePaper } from '@/lib/core/analyzer';
+import { extractPdf } from '@/lib/pdf/extract';
 import { generateStaticDeck } from '@/lib/static/staticGenerator';
 
 type Mode = 'static' | 'llm';
@@ -203,10 +205,21 @@ export default function GeneratorPanel() {
     }
 
     setIsGenerating(true);
-    setStatusMessage('调用大模型生成摘要与幻灯片结构…');
+    setStatusMessage('解析 PDF 并准备上下文…');
     setErrorMessage(null);
 
     try {
+      const extracted = await extractPdf(pdfFile);
+      const baselineAnalysis = analyzePaper(extracted, targetSlides);
+      const baselinePayload = JSON.stringify(baselineAnalysis);
+
+      setDeck({
+        metadata: baselineAnalysis.metadata,
+        outline: baselineAnalysis.outline,
+        slides: baselineAnalysis.slides,
+        latexSource: '',
+      });
+
       const formData = new FormData();
       formData.append('mode', 'llm');
       formData.append('provider', provider);
@@ -214,6 +227,9 @@ export default function GeneratorPanel() {
       formData.append('apiBaseUrl', apiBaseUrl);
       formData.append('targetSlides', String(targetSlides));
       formData.append('file', pdfFile);
+      formData.append('baseline', baselinePayload);
+
+      setStatusMessage('调用大模型生成摘要与幻灯片结构…');
 
       const response = await fetch('/api/generate', {
         method: 'POST',

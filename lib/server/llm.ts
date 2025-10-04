@@ -1,6 +1,6 @@
 import type { SlideContent } from '../types';
 import type { ExtractedPdf } from '../pdf/extract';
-import { analyzePaper, truncateSentence } from '../core/analyzer';
+import { analyzePaper, truncateSentence, type AnalysisResult } from '../core/analyzer';
 
 interface LlmOptions {
   apiKey: string;
@@ -193,10 +193,12 @@ function mapSlidePayload(slide: LlmSlidePayload, index: number): SlideContent {
 }
 
 export async function generateDeckWithLlm(
-  extracted: ExtractedPdf,
+  source: ExtractedPdf | AnalysisResult,
   options: LlmOptions,
 ) {
-  const baseline = analyzePaper(extracted, options.targetSlides);
+  const baseline: AnalysisResult = 'pageLines' in source
+    ? analyzePaper(source as ExtractedPdf, options.targetSlides)
+    : (source as AnalysisResult);
 
   const prompt = buildPrompt({
     baseMetadata: {

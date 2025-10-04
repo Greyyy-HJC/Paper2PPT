@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import { NextResponse } from 'next/server';
 import { analyzePaper, type AnalysisResult } from '@/lib/core/analyzer';
-import { extractPdf } from '@/lib/pdf/extract';
+import { extractPdf, type ExtractedPdf } from '@/lib/pdf/extract';
 import { generateDeckWithLlm } from '@/lib/server/llm';
 import { loadTemplateAssetsFromFs } from '@/lib/server/templateAssets';
 import { sanitizeFilenamePart } from '@/lib/shared/filenames';
@@ -35,15 +35,36 @@ export async function POST(request: Request) {
     const apiBaseUrl = (formData.get('apiBaseUrl') as string) ?? 'https://api.openai.com/v1';
     const targetSlides = parseTargetSlides(formData.get('targetSlides'));
 
-    const pdfBuffer = await fileEntry.arrayBuffer();
-    const extracted = await extractPdf(pdfBuffer);
+    const baselineRaw = formData.get('baseline');
+    let baselineFromClient: AnalysisResult | null = null;
+    if (typeof baselineRaw === 'string' && baselineRaw.trim().length > 0) {
+      try {
+        baselineFromClient = JSON.parse(baselineRaw) as AnalysisResult;
+      } catch (error) {
+        console.warn('[Paper2PPT] Failed to parse baseline payload', error);
+      }
+    }
 
+    let extracted: ExtractedPdf | null = null;
+    let baselineAnalysis: AnalysisResult | null = baselineFromClient;
     let deckData: Pick<AnalysisResult, 'metadata' | 'outline' | 'slides'>;
 
     const allowedProviders = new Set(['openai', 'anthropic', 'azure', 'deepseek', 'custom']);
     const normalizedProvider = allowedProviders.has(provider)
       ? (provider as 'openai' | 'anthropic' | 'azure' | 'deepseek' | 'custom')
       : 'openai';
+
+    const ensureBaseline = async (): Promise<AnalysisResult> => {
+      if (baselineAnalysis) {
+        return baselineAnalysis;
+      }
+      if (!extracted) {
+        const pdfBuffer = await fileEntry.arrayBuffer();
+        extracted = await extractPdf(pdfBuffer);
+      }
+      baselineAnalysis = analyzePaper(extracted, targetSlides);
+      return baselineAnalysis;
+    };
 
     if (mode === 'llm') {
       if (!authHeader || !authHeader.toLowerCase().startsWith('bearer ')) {
@@ -54,7 +75,9 @@ export async function POST(request: Request) {
         return new NextResponse('Invalid API key.', { status: 401 });
       }
 
-      const llmDeck = await generateDeckWithLlm(extracted, {
+      const baselineForLlm = await ensureBaseline();
+
+      const llmDeck = await generateDeckWithLlm(baselineForLlm, {
         apiKey,
         apiBaseUrl,
         model,
@@ -66,12 +89,13 @@ export async function POST(request: Request) {
         metadata: {
           ...llmDeck.metadata,
           generatedAt: new Date().toISOString(),
+          mode: 'llm',
         },
         outline: llmDeck.outline,
         slides: llmDeck.slides,
       };
     } else {
-      const baseline = analyzePaper(extracted, targetSlides);
+      const baseline = await ensureBaseline();
       deckData = {
         metadata: {
           ...baseline.metadata,

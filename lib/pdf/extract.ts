@@ -60,6 +60,15 @@ export async function extractPdf(input: PdfInput): Promise<ExtractedPdf> {
     } catch (error) {
       // ignore worker assignment errors; pdfjs will fall back to fake worker
     }
+  } else {
+    try {
+      const workerPath = typeof require !== 'undefined'
+        ? require.resolve('pdfjs-dist/build/pdf.worker.js')
+        : undefined;
+      (pdfjs as any).GlobalWorkerOptions.workerSrc = workerPath;
+    } catch (error) {
+      (pdfjs as any).GlobalWorkerOptions.workerSrc = undefined;
+    }
   }
 
   const loadingTask = pdfjs.getDocument({
