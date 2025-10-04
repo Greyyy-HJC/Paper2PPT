@@ -35,6 +35,7 @@ export async function POST(request: Request) {
     const apiBaseUrl = (formData.get('apiBaseUrl') as string) ?? 'https://api.openai.com/v1';
     const targetSlides = parseTargetSlides(formData.get('targetSlides'));
 
+    const prompt = (formData.get('prompt') as string) ?? '';
     const baselineRaw = formData.get('baseline');
     let baselineFromClient: AnalysisResult | null = null;
     if (typeof baselineRaw === 'string' && baselineRaw.trim().length > 0) {
@@ -83,6 +84,7 @@ export async function POST(request: Request) {
         model,
         provider: normalizedProvider,
         targetSlides,
+        prompt,
       });
 
       deckData = {

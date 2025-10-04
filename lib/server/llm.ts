@@ -1,6 +1,7 @@
 import type { SlideContent } from '../types';
 import type { ExtractedPdf } from '../pdf/extract';
 import { analyzePaper, truncateSentence, type AnalysisResult } from '../core/analyzer';
+import { DEFAULT_LLM_PROMPT } from '../prompts/defaultPrompt';
 
 interface LlmOptions {
   apiKey: string;
@@ -8,6 +9,7 @@ interface LlmOptions {
   model: string;
   provider: 'openai' | 'anthropic' | 'azure' | 'deepseek' | 'custom';
   targetSlides: number;
+  prompt?: string;
 }
 
 interface LlmSlidePayload {
@@ -39,6 +41,7 @@ function buildPrompt({
   outline,
   sentences,
   targetSlides,
+  instruction,
 }: {
   baseMetadata: {
     title: string;
@@ -48,6 +51,7 @@ function buildPrompt({
   outline: string[];
   sentences: string[];
   targetSlides: number;
+  instruction?: string;
 }): { system: string; user: string } {
   const keySentences = sentences.slice(0, 18).map((sentence, index) => `${index + 1}. ${truncateSentence(sentence, 200)}`);
   const context = keySentences.join('\n');
@@ -61,7 +65,7 @@ function buildPrompt({
     `Target slide count (including conclusion): ${targetSlides}.\n` +
     'Produce a structured LaTeX-friendly outline.';
 
-  const system = [
+  const systemParts = [
     'You are Paper2PPT, an expert technical writer who transforms academic papers into Beamer slide decks.',
     'Return JSON ONLY with the schema:',
     '{',
@@ -75,7 +79,15 @@ function buildPrompt({
     '}',
     `Limit slides to ${targetSlides - 2} content slides plus one conclusion slide.`,
     'Bullets must be concise (max 22 words) and factual.',
-  ].join(' ');
+  ];
+
+  const mergedInstruction = (instruction && instruction.trim().length > 0)
+    ? instruction.trim()
+    : DEFAULT_LLM_PROMPT;
+
+  systemParts.push('Guidance for content and style:', mergedInstruction);
+
+  const system = systemParts.join(' ');
 
   return { system, user };
 }
@@ -209,6 +221,7 @@ export async function generateDeckWithLlm(
     outline: baseline.outline,
     sentences: baseline.sentences,
     targetSlides: options.targetSlides,
+    instruction: options.prompt,
   });
 
   try {

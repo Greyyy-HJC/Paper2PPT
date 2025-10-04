@@ -27,6 +27,30 @@ function titleCase(input: string): string {
     .join(' ');
 }
 
+function stripSectionNumber(value: string): string {
+  return value.replace(/^\d+(?:\.\d+)*\s+/, '');
+}
+
+function normalizeHeadingKey(value: string): string {
+  return stripSectionNumber(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function uniqueSentences(sentences: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const sentence of sentences) {
+    const key = sentence.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(sentence);
+  }
+  return result;
+}
+
 export function collectHeadings(lines: string[]): string[] {
   const headings: string[] = [];
   const seen = new Set<string>();
@@ -89,22 +113,18 @@ export function truncateSentence(sentence: string, maxLength = 160): string {
   return `${truncated}…`;
 }
 
-function sentencesFromChunk(chunk: string[]): string[] {
-  const bullets: string[] = [];
-  for (const sentence of chunk) {
-    const fragments = sentence.split(/;|:(?!\/)/);
-    for (const fragment of fragments) {
-      const text = cleanLine(fragment);
-      if (text.length === 0) {
-        continue;
+function filterGeneralSentences(sentences: string[]): string[] {
+  return sentences
+    .map((sentence) => truncateSentence(sentence, 160))
+    .filter((sentence) => {
+      if (sentence.length < 25) {
+        return false;
       }
-      if (/^(figure|table)\s+\d+/i.test(text)) {
-        continue;
+      if (/\b(doi|copyright|license|creative commons|arxiv|email|www\.)/i.test(sentence)) {
+        return false;
       }
-      bullets.push(truncateSentence(text));
-    }
-  }
-  return bullets.slice(0, 6);
+      return true;
+    });
 }
 
 function deriveTitle(firstPageLines: string[], metadataTitle?: string): string {
@@ -172,66 +192,206 @@ function deriveOutline(headings: string[]): string[] {
   return outline.slice(0, 6);
 }
 
-function buildContentSlides(
+function collectSectionDrafts(
+  extracted: ExtractedPdf,
   outline: string[],
+): {
+  sectionBullets: Map<string, string[]>;
+  abstractBullets: string[];
+  keywordBullets: string[];
+} {
+  const normalizedHeadingMap = new Map<string, string>();
+  outline.forEach((heading) => {
+    const key = normalizeHeadingKey(heading);
+    if (key.length > 0 && !normalizedHeadingMap.has(key)) {
+      normalizedHeadingMap.set(key, heading);
+    }
+  });
+
+  const sectionLines = new Map<string, string[]>();
+  const abstractLines: string[] = [];
+  const keywordLines: string[] = [];
+
+  const pushSectionLine = (heading: string, line: string) => {
+    if (!sectionLines.has(heading)) {
+      sectionLines.set(heading, []);
+    }
+    sectionLines.get(heading)!.push(line);
+  };
+
+  let currentHeading: string | null = null;
+
+  for (const page of extracted.pageLines) {
+    for (const rawLine of page) {
+      const trimmed = cleanLine(rawLine);
+      if (!trimmed) {
+        continue;
+      }
+
+      const stripped = stripSectionNumber(trimmed);
+      const normalized = normalizeHeadingKey(stripped);
+
+      if (normalized === 'abstract') {
+        currentHeading = 'Abstract';
+        continue;
+      }
+
+      if (normalized === 'keywords') {
+        currentHeading = 'Keywords';
+        continue;
+      }
+
+      let matchedHeading = normalizedHeadingMap.get(normalized);
+      if (!matchedHeading && normalized.length > 0) {
+        for (const [key, value] of Array.from(normalizedHeadingMap.entries())) {
+          if (normalized.startsWith(key) || key.startsWith(normalized)) {
+            matchedHeading = value;
+            break;
+          }
+        }
+      }
+
+      if (matchedHeading) {
+        currentHeading = matchedHeading;
+        continue;
+      }
+
+      if (currentHeading === 'Abstract') {
+        abstractLines.push(trimmed);
+        continue;
+      }
+
+      if (currentHeading === 'Keywords') {
+        keywordLines.push(trimmed);
+        continue;
+      }
+
+      if (currentHeading) {
+        pushSectionLine(currentHeading, trimmed);
+      }
+    }
+  }
+
+  const sectionBullets = new Map<string, string[]>();
+  for (const [heading, lines] of Array.from(sectionLines.entries())) {
+    const sentences = uniqueSentences(splitIntoSentences(lines.join(' ')))
+      .map((sentence) => truncateSentence(sentence, 150))
+      .filter((sentence) => sentence.length > 20)
+      .slice(0, 5);
+    if (sentences.length > 0) {
+      sectionBullets.set(heading, sentences);
+    }
+  }
+
+  const abstractBullets = abstractLines.length > 0
+    ? uniqueSentences(splitIntoSentences(abstractLines.join(' ')))
+        .map((sentence) => truncateSentence(sentence, 150))
+        .filter((sentence) => sentence.length > 20)
+        .slice(0, 5)
+    : [];
+
+  let keywordSource = '';
+  if (keywordLines.length > 0) {
+    keywordSource = keywordLines.join(' ');
+  }
+  if (!keywordSource && extracted.pageLines[0]) {
+    for (const rawLine of extracted.pageLines[0]) {
+      const match = rawLine.match(/keywords?[:\-]?\s*(.*)/i);
+      if (match && match[1]) {
+        keywordSource = match[1];
+        break;
+      }
+    }
+  }
+
+  const keywordBullets = keywordSource
+    ? keywordSource
+        .split(/[,;•]/)
+        .map((token) => cleanLine(token))
+        .filter((token) => token.length > 2 && token.length <= 60)
+        .slice(0, 6)
+    : [];
+
+  return { sectionBullets, abstractBullets, keywordBullets };
+}
+
+function deriveAuthorBullets(firstPageLines: string[], metadataAuthor?: string): string[] {
+  const names = new Set<string>();
+  const affiliations = new Set<string>();
+
+  const pushName = (value: string) => {
+    const cleaned = cleanLine(value);
+    if (cleaned.length > 1 && cleaned.length <= 80) {
+      names.add(cleaned);
+    }
+  };
+
+  const splitAuthorString = (value: string) => {
+    value.split(/,|;| and /i)
+      .map((part) => cleanLine(part))
+      .filter((part) => part.length > 1 && part.length <= 80 && !/@/.test(part))
+      .forEach((part) => pushName(part));
+  };
+
+  if (metadataAuthor) {
+    splitAuthorString(metadataAuthor);
+  }
+
+  const linesToInspect = firstPageLines.slice(0, 12);
+  const affiliationRegex = /(university|institute|department|school|laboratory|centre|center|college|academy)/i;
+
+  for (const rawLine of linesToInspect) {
+    const cleaned = cleanLine(rawLine);
+    if (!cleaned || cleaned.length > 120) {
+      continue;
+    }
+    if (/abstract|keywords?/i.test(cleaned)) {
+      continue;
+    }
+    if (/@/.test(cleaned)) {
+      continue;
+    }
+    if (affiliationRegex.test(cleaned)) {
+      affiliations.add(cleaned);
+      continue;
+    }
+    if (/,| and |;/i.test(cleaned) || /^[A-Z][A-Za-z\-\. ]{3,}$/.test(cleaned)) {
+      splitAuthorString(cleaned);
+    }
+  }
+
+  const bullets: string[] = [];
+  names.forEach((name) => bullets.push(`Author: ${name}`));
+  affiliations.forEach((aff) => bullets.push(`Affiliation: ${aff}`));
+
+  return bullets.slice(0, 6);
+}
+
+function extractAbstractBullets(
+  draftBullets: string[],
   sentences: string[],
-  targetContentSlides: number,
-): SlideContent[] {
-  const filteredSentences = sentences.filter((sentence) => {
-    if (sentence.length < 20) {
-      return false;
-    }
-    if (/\b(doi|copyright|license|creative commons|arxiv|email|www\.)/i.test(sentence)) {
-      return false;
-    }
-    return true;
-  });
-
-  const effectiveSlides = Math.max(
-    3,
-    Math.min(targetContentSlides, Math.max(3, Math.ceil(filteredSentences.length / 3))),
-  );
-
-  const chunkSize = Math.max(1, Math.ceil(filteredSentences.length / effectiveSlides));
-  const chunks: string[][] = [];
-
-  for (let i = 0; i < filteredSentences.length; i += chunkSize) {
-    chunks.push(filteredSentences.slice(i, i + chunkSize));
+): string[] {
+  if (draftBullets.length > 0) {
+    return draftBullets.slice(0, 5);
   }
+  return filterGeneralSentences(sentences).slice(0, 4);
+}
 
-  while (chunks.length < effectiveSlides) {
-    chunks.push([]);
+function takeMatchingFromQueue(keyword: string, queue: string[], count: number): string[] {
+  const lowerKeyword = keyword.toLowerCase();
+  const picked: string[] = [];
+  let index = 0;
+  while (index < queue.length && picked.length < count) {
+    if (queue[index].toLowerCase().includes(lowerKeyword)) {
+      picked.push(queue.splice(index, 1)[0]);
+      continue;
+    }
+    index += 1;
   }
-
-  const sections = outline.length > 0 ? outline.slice(0, Math.min(outline.length, 6)) : FALLBACK_OUTLINE;
-  const slidesPerSection = Math.max(1, Math.ceil(chunks.length / sections.length));
-
-  const slides: SlideContent[] = [];
-
-  chunks.forEach((chunk, index) => {
-    const sectionIndex = Math.min(sections.length - 1, Math.floor(index / slidesPerSection));
-    const sectionTitle = sections[sectionIndex];
-    const bullets = sentencesFromChunk(chunk);
-
-    const titleFromBullet = bullets[0]?.split('.').shift() ?? undefined;
-    const slideTitle = titleFromBullet && titleFromBullet.length > 4 && titleFromBullet.length < 70
-      ? titleFromBullet
-      : `${sectionTitle}`;
-
-    slides.push({
-      id: `slide-${index + 1}`,
-      title: slideTitle,
-      section: sectionTitle,
-      blocks: [
-        {
-          kind: 'bullets',
-          items: bullets.length > 0 ? bullets : ['Key points will be refined after manual editing.'],
-        },
-      ],
-    });
-  });
-
-  return slides;
+  if (picked.length < count) {
+    picked.push(...queue.splice(0, Math.max(0, count - picked.length)));
+  }
+  return picked;
 }
 
 function buildClosingSlide(sentences: string[]): SlideContent {
@@ -279,11 +439,94 @@ export function analyzePaper(
   const outline = deriveOutline(outlineHeadings);
 
   const sentences = splitIntoSentences(extracted.allText);
-  const targetContentSlides = Math.max(3, Math.min(targetSlides - 3, 12));
+  const generalSentenceQueue = filterGeneralSentences(sentences);
 
-  const contentSlides = buildContentSlides(outline, sentences, targetContentSlides);
+  const { sectionBullets, abstractBullets, keywordBullets } = collectSectionDrafts(extracted, outline);
+  const authorBullets = deriveAuthorBullets(firstPage, authors);
+  const abstractSlideBullets = extractAbstractBullets(abstractBullets, sentences);
+
+  const slides: SlideContent[] = [];
+
+  if (authorBullets.length > 0) {
+    slides.push({
+      id: 'authors-slide',
+      title: '作者与机构',
+      section: 'Introduction',
+      blocks: [
+        {
+          kind: 'bullets',
+          items: authorBullets,
+        },
+      ],
+    });
+  }
+
+  if (keywordBullets.length > 0) {
+    slides.push({
+      id: 'keywords-slide',
+      title: '关键术语',
+      section: 'Introduction',
+      blocks: [
+        {
+          kind: 'bullets',
+          items: keywordBullets,
+        },
+      ],
+    });
+  }
+
+  if (abstractSlideBullets.length > 0) {
+    slides.push({
+      id: 'abstract-slide',
+      title: '摘要概览',
+      section: 'Introduction',
+      blocks: [
+        {
+          kind: 'bullets',
+          items: abstractSlideBullets.slice(0, 4),
+        },
+      ],
+    });
+
+    abstractSlideBullets.forEach((item) => {
+      const idx = generalSentenceQueue.findIndex((sentence) => sentence === item);
+      if (idx >= 0) {
+        generalSentenceQueue.splice(idx, 1);
+      }
+    });
+  }
+
+  const targetContentSlides = Math.max(3, Math.min(targetSlides - 3, 12));
+  const leadingSlidesCount = slides.length;
+  const remainingSectionSlots = Math.max(1, targetContentSlides - leadingSlidesCount);
+  const sectionHeadings = outline.length > 0
+    ? outline.slice(0, Math.min(outline.length, remainingSectionSlots))
+    : FALLBACK_OUTLINE.slice(0, remainingSectionSlots);
+
+  sectionHeadings.forEach((heading, index) => {
+    const draftBullets = sectionBullets.get(heading) ?? [];
+    const items = draftBullets.length > 0
+      ? draftBullets.slice(0, 4)
+      : takeMatchingFromQueue(heading, generalSentenceQueue, 4);
+    const cleanedItems = items.length > 0
+      ? items.map((item) => truncateSentence(item, 150))
+      : ['(内容待补充)'];
+
+    slides.push({
+      id: `section-${index + 1}`,
+      title: heading,
+      section: heading,
+      blocks: [
+        {
+          kind: 'bullets',
+          items: cleanedItems,
+        },
+      ],
+    });
+  });
+
   const closingSlide = buildClosingSlide(sentences);
-  const slides: SlideContent[] = [...contentSlides, closingSlide];
+  slides.push(closingSlide);
 
   const metadata: DeckMetadata = {
     paperTitle,
