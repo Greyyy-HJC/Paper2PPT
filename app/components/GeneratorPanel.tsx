@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { GeneratedDeck } from '@/lib/types';
 import { analyzePaper } from '@/lib/core/analyzer';
+import { applyFigureAssetsToSlides } from '@/lib/core/figures';
 import { extractPdf } from '@/lib/pdf/extract';
+import { extractFigureImages } from '@/lib/pdf/figureRendering';
 import { DEFAULT_LLM_PROMPT } from '@/lib/prompts/defaultPrompt';
 import { generateStaticDeck } from '@/lib/static/staticGenerator';
 
@@ -213,12 +215,30 @@ export default function GeneratorPanel() {
     try {
       const extracted = await extractPdf(pdfFile);
       const baselineAnalysis = analyzePaper(extracted, targetSlides);
+
+      const figureAssets = await extractFigureImages(pdfFile, baselineAnalysis.figures ?? []);
+      const figureDescriptors = figureAssets.map((asset) => ({
+        id: asset.id,
+        filename: asset.filename,
+        caption: asset.caption,
+      }));
+
+      if (baselineAnalysis.figures) {
+        baselineAnalysis.figures = baselineAnalysis.figures.map((figure) => {
+          const match = figureDescriptors.find((descriptor) => descriptor.id === figure.id);
+          return match ? { ...figure, filename: match.filename } : figure;
+        });
+      }
+
+      const slidesWithFigures = applyFigureAssetsToSlides(baselineAnalysis.slides, figureDescriptors);
+      baselineAnalysis.slides = slidesWithFigures;
+
       const baselinePayload = JSON.stringify(baselineAnalysis);
 
       setDeck({
         metadata: baselineAnalysis.metadata,
         outline: baselineAnalysis.outline,
-        slides: baselineAnalysis.slides,
+        slides: slidesWithFigures,
         latexSource: '',
       });
 
@@ -230,6 +250,10 @@ export default function GeneratorPanel() {
       formData.append('targetSlides', String(targetSlides));
       formData.append('file', pdfFile);
       formData.append('baseline', baselinePayload);
+      formData.append('figureMeta', JSON.stringify(figureDescriptors));
+      figureAssets.forEach((asset) => {
+        formData.append('figures', asset.blob, asset.filename);
+      });
       formData.append('prompt', prompt);
 
       setStatusMessage('调用大模型生成摘要与幻灯片结构…');

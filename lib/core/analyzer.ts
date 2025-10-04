@@ -1,11 +1,22 @@
 import type { DeckMetadata, SlideContent } from '../types';
 import type { ExtractedPdf } from '../pdf/extract';
 
+export interface FigureSummary {
+  id: string;
+  pageIndex: number;
+  caption?: string;
+  title: string;
+  section: string;
+  subsection: string;
+  filename?: string;
+}
+
 export interface AnalysisResult {
   metadata: DeckMetadata;
   outline: string[];
   slides: SlideContent[];
   sentences: string[];
+  figures?: FigureSummary[];
 }
 
 const FALLBACK_OUTLINE = [
@@ -49,6 +60,53 @@ function uniqueSentences(sentences: string[]): string[] {
     result.push(sentence);
   }
   return result;
+}
+
+interface FigureEntry {
+  pageIndex: number;
+  caption?: string;
+}
+
+function collectFigureEntries(extracted: ExtractedPdf, maxEntries = 6): FigureEntry[] {
+  const entries: FigureEntry[] = [];
+
+  for (let pageIndex = 0; pageIndex < extracted.pageLines.length; pageIndex += 1) {
+    const lines = extracted.pageLines[pageIndex];
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = cleanLine(lines[lineIndex]);
+      if (!line) {
+        continue;
+      }
+
+      if (!/^(fig(?:ure)?\.|figure)\b/i.test(line)) {
+        continue;
+      }
+
+      const captionParts: string[] = [];
+      const initial = line.replace(/^(fig(?:ure)?\.?\s*\d*[:\-]?)/i, '').trim();
+      if (initial.length > 0) {
+        captionParts.push(initial);
+      }
+
+      for (let offset = 1; offset <= 2 && lineIndex + offset < lines.length; offset += 1) {
+        const nextLine = cleanLine(lines[lineIndex + offset]);
+        if (!nextLine || /^(fig(?:ure)?\.|figure)\b/i.test(nextLine)) {
+          break;
+        }
+        captionParts.push(nextLine);
+      }
+
+      const caption = captionParts.join(' ').trim();
+      entries.push({ pageIndex, caption: caption.length > 0 ? caption : undefined });
+      break;
+    }
+
+    if (entries.length >= maxEntries) {
+      break;
+    }
+  }
+
+  return entries;
 }
 
 export function collectHeadings(lines: string[]): string[] {
@@ -446,6 +504,7 @@ export function analyzePaper(
   const abstractSlideBullets = extractAbstractBullets(abstractBullets, sentences);
 
   const slides: SlideContent[] = [];
+  const figureSummaries: FigureSummary[] = [];
 
   if (authorBullets.length > 0) {
     slides.push({
@@ -566,6 +625,34 @@ export function analyzePaper(
     });
   }
 
+  const figureEntries = collectFigureEntries(extracted);
+  figureEntries.forEach((entry, index) => {
+    const id = `figure-${index + 1}`;
+    const title = entry.caption ? truncateSentence(entry.caption, 60) : `图示 ${index + 1}`;
+    const subsection = title;
+    figureSummaries.push({
+      id,
+      pageIndex: entry.pageIndex,
+      caption: entry.caption,
+      title,
+      section: 'Figures',
+      subsection,
+    });
+
+    slides.push({
+      id,
+      title,
+      section: 'Figures',
+      subsection,
+      blocks: [
+        {
+          kind: 'bullets',
+          items: entry.caption ? [entry.caption] : ['图示说明待补充'],
+        },
+      ],
+    });
+  });
+
   const closingSlide = buildClosingSlide(sentences);
   const contentSlides = [...slides, closingSlide];
 
@@ -582,5 +669,5 @@ export function analyzePaper(
     slideCount: contentSlides.length + 2,
   };
 
-  return { metadata, outline, slides: contentSlides, sentences };
+  return { metadata, outline, slides: contentSlides, sentences, figures: figureSummaries };
 }

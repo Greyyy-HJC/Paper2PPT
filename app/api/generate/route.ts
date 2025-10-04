@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { NextResponse } from 'next/server';
 import { analyzePaper, type AnalysisResult } from '@/lib/core/analyzer';
+import { applyFigureAssetsToSlides } from '@/lib/core/figures';
 import { extractPdf, type ExtractedPdf } from '@/lib/pdf/extract';
 import { generateDeckWithLlm } from '@/lib/server/llm';
 import { loadTemplateAssetsFromFs } from '@/lib/server/templateAssets';
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
 
     const prompt = (formData.get('prompt') as string) ?? '';
     const baselineRaw = formData.get('baseline');
+    const figureMetaRaw = formData.get('figureMeta');
     let baselineFromClient: AnalysisResult | null = null;
     if (typeof baselineRaw === 'string' && baselineRaw.trim().length > 0) {
       try {
@@ -45,6 +47,21 @@ export async function POST(request: Request) {
         console.warn('[Paper2PPT] Failed to parse baseline payload', error);
       }
     }
+
+    let figureDescriptors: { id: string; filename: string; caption?: string }[] = [];
+    if (typeof figureMetaRaw === 'string' && figureMetaRaw.trim().length > 0) {
+      try {
+        figureDescriptors = JSON.parse(figureMetaRaw) as { id: string; filename: string; caption?: string }[];
+      } catch (error) {
+        console.warn('[Paper2PPT] Failed to parse figure meta', error);
+      }
+    }
+
+    const figureFiles = formData.getAll('figures').filter((item): item is File => item instanceof File);
+    const figureFileMap = new Map<string, File>();
+    figureFiles.forEach((file) => {
+      figureFileMap.set(file.name, file);
+    });
 
     let extracted: ExtractedPdf | null = null;
     let baselineAnalysis: AnalysisResult | null = baselineFromClient;
@@ -109,6 +126,11 @@ export async function POST(request: Request) {
       };
     }
 
+    if (figureDescriptors.length > 0) {
+      deckData.slides = applyFigureAssetsToSlides(deckData.slides, figureDescriptors);
+      deckData.metadata.slideCount = deckData.slides.length + 2;
+    }
+
     const latexSource = renderIfBeamerDocument({
       metadata: deckData.metadata,
       outline: deckData.outline,
@@ -121,6 +143,17 @@ export async function POST(request: Request) {
 
     for (const asset of templateAssets) {
       zip.file(asset.path, asset.data, { binary: true });
+    }
+
+    if (figureDescriptors.length > 0) {
+      for (const descriptor of figureDescriptors) {
+        const file = figureFileMap.get(descriptor.filename);
+        if (!file) {
+          continue;
+        }
+        const buffer = Buffer.from(await file.arrayBuffer());
+        zip.file(`figuras/${descriptor.filename}`, buffer, { binary: true });
+      }
     }
 
     const filenameStem = sanitizeFilenamePart(deckData.metadata.paperTitle);

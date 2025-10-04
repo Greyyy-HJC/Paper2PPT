@@ -26,7 +26,21 @@ function renderBlock(block: SlideBlock): string {
       '\\begin{quote}',
       escapeLatex(block.text),
       '\\end{quote}',
-    ].join('\n');
+    ].join('\\n');
+  }
+
+  if (block.kind === 'image') {
+    const width = block.width ?? '0.9\\textwidth';
+    const lines = [
+      '\\begin{figure}[h]',
+      '  \\centering',
+      `  \\includegraphics[width=${width}]{${block.path}}`,
+    ];
+    if (block.caption && block.caption.trim().length > 0) {
+      lines.push(`  \\caption{${escapeLatex(block.caption)}}`);
+    }
+    lines.push('\\end{figure}');
+    return lines.join('\\n');
   }
 
   const items = block.items
@@ -37,7 +51,7 @@ function renderBlock(block: SlideBlock): string {
     items.push('  \\item (content placeholder)');
   }
 
-  return ['\\begin{itemize}', ...items, '\\end{itemize}'].join('\n');
+  return ['\\begin{itemize}', ...items, '\\end{itemize}'].join('\\n');
 }
 
 function renderFrame(slide: SlideContent): string {

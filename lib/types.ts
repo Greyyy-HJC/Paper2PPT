@@ -10,6 +10,12 @@ export type SlideBlock =
   | {
       kind: 'quote';
       text: string;
+    }
+  | {
+      kind: 'image';
+      path: string;
+      caption?: string;
+      width?: string;
     };
 
 export interface SlideContent {

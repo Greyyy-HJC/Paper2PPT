@@ -1,6 +1,8 @@
 import JSZip from 'jszip';
+import { applyFigureAssetsToSlides } from '../core/figures';
 import { analyzePaper } from '../core/analyzer';
 import { extractPdf } from '../pdf/extract';
+import { extractFigureImages } from '../pdf/figureRendering';
 import { sanitizeFilenamePart } from '../shared/filenames';
 import { renderIfBeamerDocument } from '../templates/ifBeamer';
 import type { GeneratedDeck } from '../types';
@@ -61,6 +63,22 @@ export async function generateStaticDeck(file: File, options: StaticOptions = {}
     latexSource: '',
   };
 
+  let figureAssets = [] as Awaited<ReturnType<typeof extractFigureImages>>;
+  if (analysis.figures && analysis.figures.length > 0) {
+    try {
+      figureAssets = await extractFigureImages(file, analysis.figures);
+      const descriptors = figureAssets.map(({ id, filename, caption }) => ({ id, filename, caption }));
+      analysis.figures = analysis.figures.map((summary) => {
+        const match = descriptors.find((descriptor) => descriptor.id === summary.id);
+        return match ? { ...summary, filename: match.filename } : summary;
+      });
+      deck.slides = applyFigureAssetsToSlides(deck.slides, descriptors);
+      deck.metadata.slideCount = deck.slides.length + 2;
+    } catch (error) {
+      console.warn('[Paper2PPT] Failed to extract figure images', error);
+    }
+  }
+
   const latexSource = renderIfBeamerDocument({
     metadata: deck.metadata,
     outline: deck.outline,
@@ -75,6 +93,10 @@ export async function generateStaticDeck(file: File, options: StaticOptions = {}
 
   for (const asset of templateAssets) {
     zip.file(asset.path, asset.data, { binary: true });
+  }
+
+  for (const asset of figureAssets) {
+    zip.file(`figuras/${asset.filename}`, asset.blob, { binary: true });
   }
 
   const filenameStem = sanitizeFilenamePart(deck.metadata.paperTitle);
