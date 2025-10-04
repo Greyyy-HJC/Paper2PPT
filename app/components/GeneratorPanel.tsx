@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { GeneratedDeck } from '@/lib/types';
 import { analyzePaper } from '@/lib/core/analyzer';
 import { extractPdf } from '@/lib/pdf/extract';
+import { DEFAULT_LLM_PROMPT } from '@/lib/prompts/defaultPrompt';
 import { generateStaticDeck } from '@/lib/static/staticGenerator';
 
 type Mode = 'static' | 'llm';
@@ -108,6 +109,7 @@ export default function GeneratorPanel() {
   const [isCustomModel, setIsCustomModel] = useState<boolean>(PROVIDER_CONFIG.openai.models.length === 0);
   const [apiKey, setApiKey] = usePersistentState('paper2ppt-api-key', '');
   const [apiBaseUrl, setApiBaseUrl] = usePersistentState('paper2ppt-api-base', 'https://api.openai.com/v1');
+  const [prompt, setPrompt] = usePersistentState('paper2ppt-custom-prompt', DEFAULT_LLM_PROMPT);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
@@ -228,6 +230,7 @@ export default function GeneratorPanel() {
       formData.append('targetSlides', String(targetSlides));
       formData.append('file', pdfFile);
       formData.append('baseline', baselinePayload);
+      formData.append('prompt', prompt);
 
       setStatusMessage('调用大模型生成摘要与幻灯片结构…');
 
@@ -267,7 +270,7 @@ export default function GeneratorPanel() {
     } finally {
       setIsGenerating(false);
     }
-  }, [pdfFile, apiKey, provider, model, apiBaseUrl, targetSlides, downloadUrl]);
+  }, [pdfFile, apiKey, provider, model, apiBaseUrl, targetSlides, prompt, downloadUrl]);
 
   const handleModelPresetChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -337,6 +340,14 @@ export default function GeneratorPanel() {
                 LLM：需要个人 API Key
               </div>
             )}
+            <a
+              href="https://github.com/Greyyy-HJC/Paper2PPT"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center rounded-full border border-slate-200 px-2 py-1 font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+            >
+              GitHub 仓库
+            </a>
           </div>
         </div>
 
@@ -453,9 +464,22 @@ export default function GeneratorPanel() {
                     type="text"
                     value={apiBaseUrl}
                     onChange={(event) => setApiBaseUrl(event.target.value)}
-                    placeholder={providerConfig.defaultBaseUrl ?? 'https://...' }
+                    placeholder={providerConfig.defaultBaseUrl ?? 'https://...'}
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
                   />
+                </label>
+
+                <label className="block space-y-2 text-sm text-slate-600">
+                  <span>提示词（可选）</span>
+                  <textarea
+                    value={prompt}
+                    onChange={(event) => setPrompt(event.target.value)}
+                    rows={6}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none font-mono"
+                  />
+                  <span className="block text-xs text-slate-400">
+                    默认提示词会引导模型解释概念、覆盖方法与结果，你也可以在此基础上追加或修改要求。
+                  </span>
                 </label>
               </>
             ) : (

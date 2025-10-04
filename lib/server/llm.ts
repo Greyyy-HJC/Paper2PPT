@@ -1,6 +1,7 @@
 import type { SlideContent } from '../types';
 import type { ExtractedPdf } from '../pdf/extract';
 import { analyzePaper, truncateSentence, type AnalysisResult } from '../core/analyzer';
+import { DEFAULT_LLM_PROMPT } from '../prompts/defaultPrompt';
 
 interface LlmOptions {
   apiKey: string;
@@ -8,6 +9,7 @@ interface LlmOptions {
   model: string;
   provider: 'openai' | 'anthropic' | 'azure' | 'deepseek' | 'custom';
   targetSlides: number;
+  prompt?: string;
 }
 
 interface LlmSlidePayload {
@@ -39,6 +41,7 @@ function buildPrompt({
   outline,
   sentences,
   targetSlides,
+  instruction,
 }: {
   baseMetadata: {
     title: string;
@@ -48,20 +51,22 @@ function buildPrompt({
   outline: string[];
   sentences: string[];
   targetSlides: number;
+  instruction?: string;
 }): { system: string; user: string } {
   const keySentences = sentences.slice(0, 18).map((sentence, index) => `${index + 1}. ${truncateSentence(sentence, 200)}`);
   const context = keySentences.join('\n');
   const outlineText = outline.map((item, index) => `${index + 1}. ${item}`).join('\n');
+  const desiredContentSlides = Math.max(3, Math.min(targetSlides - 2, 15));
 
   const user = `Paper title: ${baseMetadata.title}\n` +
     (baseMetadata.subtitle ? `Subtitle or venue: ${baseMetadata.subtitle}\n` : '') +
     (baseMetadata.authors ? `Author line: ${baseMetadata.authors}\n` : '') +
     `Suggested outline:\n${outlineText || '1. Introduction\n2. Method\n3. Results\n4. Conclusion'}\n\n` +
     `Important sentences from the paper (truncated):\n${context}\n\n` +
-    `Target slide count (including conclusion): ${targetSlides}.\n` +
+    `Content slides required (excluding title/agenda): ${desiredContentSlides}.\n` +
     'Produce a structured LaTeX-friendly outline.';
 
-  const system = [
+  const systemParts = [
     'You are Paper2PPT, an expert technical writer who transforms academic papers into Beamer slide decks.',
     'Return JSON ONLY with the schema:',
     '{',
@@ -73,9 +78,17 @@ function buildPrompt({
     '     { "section": string, "title": string, "bullets": string[], "notes": string }',
     '  ]',
     '}',
-    `Limit slides to ${targetSlides - 2} content slides plus one conclusion slide.`,
+    `Produce exactly ${desiredContentSlides} content slides in this order, with the final slide devoted to Conclusion.`,
     'Bullets must be concise (max 22 words) and factual.',
-  ].join(' ');
+  ];
+
+  const mergedInstruction = (instruction && instruction.trim().length > 0)
+    ? instruction.trim()
+    : DEFAULT_LLM_PROMPT;
+
+  systemParts.push('Guidance for content and style:', mergedInstruction);
+
+  const system = systemParts.join(' ');
 
   return { system, user };
 }
@@ -200,6 +213,8 @@ export async function generateDeckWithLlm(
     ? analyzePaper(source as ExtractedPdf, options.targetSlides)
     : (source as AnalysisResult);
 
+  const desiredContentSlides = Math.max(3, Math.min(options.targetSlides - 2, 15));
+
   const prompt = buildPrompt({
     baseMetadata: {
       title: baseline.metadata.paperTitle,
@@ -209,6 +224,7 @@ export async function generateDeckWithLlm(
     outline: baseline.outline,
     sentences: baseline.sentences,
     targetSlides: options.targetSlides,
+    instruction: options.prompt,
   });
 
   try {
@@ -233,7 +249,19 @@ export async function generateDeckWithLlm(
         }));
 
     const mappedSlides = slidesPayload.map((slide, index) => mapSlidePayload(slide, index));
-    const finalSlides = mappedSlides.length > 0 ? mappedSlides : baseline.slides;
+    let finalSlides = mappedSlides.length > 0 ? mappedSlides : baseline.slides;
+
+    if (finalSlides.length > desiredContentSlides) {
+      finalSlides = finalSlides.slice(0, desiredContentSlides);
+    } else if (finalSlides.length < desiredContentSlides) {
+      const fallbackQueue = baseline.slides.filter((slide) => !finalSlides.find((item) => item.id === slide.id));
+      for (const slide of fallbackQueue) {
+        if (finalSlides.length >= desiredContentSlides) {
+          break;
+        }
+        finalSlides.push(slide);
+      }
+    }
 
     return {
       metadata: {
@@ -248,13 +276,14 @@ export async function generateDeckWithLlm(
     };
   } catch (error) {
     // fallback to baseline if LLM fails
+    const fallbackSlides = baseline.slides.slice(0, desiredContentSlides);
     return {
       metadata: {
         ...baseline.metadata,
         mode: 'static' as const,
       },
       outline: baseline.outline,
-      slides: baseline.slides,
+      slides: fallbackSlides,
     };
   }
 }

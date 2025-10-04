@@ -22,6 +22,14 @@ export default function RootLayout({
               <p className="text-sm text-slate-600 sm:text-base">
                 支持纯浏览器静态解析，或接入自有大模型 API 获得更高质量摘要与讲稿结构。
               </p>
+              <a
+                href="https://jinchen.space"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 underline decoration-dotted underline-offset-4 hover:text-slate-700"
+              >
+                访问项目作者主页 →
+              </a>
             </div>
           </header>
           <main className="flex-1">{children}</main>

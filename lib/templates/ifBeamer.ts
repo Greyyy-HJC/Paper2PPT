@@ -120,11 +120,19 @@ export function renderIfBeamerDocument(input: RenderInput): string {
   docLines.push('');
 
   let currentSection: string | undefined;
+  let currentSubsection: string | undefined;
   for (const slide of slides) {
     if (slide.section && slide.section !== currentSection) {
       docLines.push('\\section{' + escapeLatex(slide.section) + '}');
       docLines.push('');
       currentSection = slide.section;
+      currentSubsection = undefined;
+    }
+
+    if (slide.subsection && slide.subsection !== currentSubsection) {
+      docLines.push('\\subsection{' + escapeLatex(slide.subsection) + '}');
+      docLines.push('');
+      currentSubsection = slide.subsection;
     }
 
     docLines.push(renderFrame(slide));

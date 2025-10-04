@@ -17,6 +17,7 @@ export interface SlideContent {
   title: string;
   blocks: SlideBlock[];
   section?: string;
+  subsection?: string;
   notes?: string;
 }
 
@@ -44,4 +45,5 @@ export interface GenerateRequestOptions {
   apiKey?: string;
   apiBaseUrl?: string;
   model?: string;
+  prompt?: string;
 }
