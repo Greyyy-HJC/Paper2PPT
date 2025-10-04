@@ -3,9 +3,9 @@
 欢迎来到 Paper2PPT！本说明概述当前能力、关键资产与开发约束，便于后续自动化协作。
 
 ## 现状概览
-- 前端：Next.js 14 + TypeScript + Tailwind，`app/components/GeneratorPanel.tsx` 提供静态生成与 LLM 生成两种流程。
-- 静态模式：`lib/static/staticGenerator.ts` 在浏览器内解析 PDF、构建幻灯片结构并打包模板。
-- LLM 模式：`app/api/generate/route.ts` 调度 `lib/server/llm.ts` 调用 OpenAI 兼容接口，生成更高质量的 slide 数据，再返回 zip/base64。
+- 前端：Next.js 14 + TypeScript + Tailwind，`app/components/GeneratorPanel.tsx` 提供静态生成与 LLM 生成两种流程，支持模型下拉选择与自定义服务。
+- 静态模式：`lib/static/staticGenerator.ts` 在浏览器内解析 PDF、构建幻灯片结构并打包模板，worker 文件位于 `public/pdf.worker.min.js`。
+- LLM 模式：`app/api/generate/route.ts` 调度 `lib/server/llm.ts`，现已适配 OpenAI / DeepSeek（chat completions）、Azure OpenAI（api-key 头）以及 Anthropic Claude `/v1/messages` 协议。
 - 模板资源：位于 `public/templates/if-beamer/`，`manifest.json` 控制打包资源。
 - 构建：`npm run build` 输出常规 SSR 版本；`npm run build:static`（设置 `STATIC_EXPORT=true`）用于 GitHub Pages，仅保留静态模式。
 
@@ -24,7 +24,7 @@
 
 ## 待办方向
 - 提升静态模式摘要质量（更细化段落划分、引用图表）。
-- 扩展 LLM 适配层（Anthropic 专有端点、Gemini 等）。
+- 扩展 LLM 适配层（如 Google Gemini、Moonshot、百度千帆等）。
 - 添加生成后可视化预览、手动编辑与多模板支持。
 - 引入单元测试 / e2e 流程以保障 PDF 解析与 LaTeX 生成的稳定性。
 

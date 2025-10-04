@@ -40,6 +40,11 @@ export async function POST(request: Request) {
 
     let deckData: Pick<AnalysisResult, 'metadata' | 'outline' | 'slides'>;
 
+    const allowedProviders = new Set(['openai', 'anthropic', 'azure', 'deepseek', 'custom']);
+    const normalizedProvider = allowedProviders.has(provider)
+      ? (provider as 'openai' | 'anthropic' | 'azure' | 'deepseek' | 'custom')
+      : 'openai';
+
     if (mode === 'llm') {
       if (!authHeader || !authHeader.toLowerCase().startsWith('bearer ')) {
         return new NextResponse('Missing Authorization Bearer token for LLM mode.', { status: 401 });
@@ -53,9 +58,7 @@ export async function POST(request: Request) {
         apiKey,
         apiBaseUrl,
         model,
-        provider: (['openai', 'anthropic', 'azure', 'custom'].includes(provider)
-          ? (provider as 'openai' | 'anthropic' | 'azure' | 'custom')
-          : 'openai'),
+        provider: normalizedProvider,
         targetSlides,
       });
 

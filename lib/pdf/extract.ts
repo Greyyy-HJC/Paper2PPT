@@ -50,17 +50,21 @@ export async function extractPdf(input: PdfInput): Promise<ExtractedPdf> {
   const data = new Uint8Array(arrayBuffer);
   const pdfjs = await import('pdfjs-dist/build/pdf');
 
-  try {
-    const assetPrefix = resolveAssetPrefix();
-    const workerSrc = `${assetPrefix}/pdf.worker.min.js`;
-    (pdfjs as any).GlobalWorkerOptions.workerSrc = workerSrc;
-  } catch (error) {
-    // ignore worker assignment errors; pdfjs will fall back to fake worker
+  const isBrowser = typeof window !== 'undefined';
+
+  if (isBrowser) {
+    try {
+      const assetPrefix = resolveAssetPrefix();
+      const workerSrc = `${assetPrefix}/pdf.worker.min.js`;
+      (pdfjs as any).GlobalWorkerOptions.workerSrc = workerSrc;
+    } catch (error) {
+      // ignore worker assignment errors; pdfjs will fall back to fake worker
+    }
   }
 
   const loadingTask = pdfjs.getDocument({
     data,
-    disableWorker: typeof Worker === 'undefined',
+    disableWorker: !isBrowser || typeof Worker === 'undefined',
     useSystemFonts: true,
   } as any);
   const doc = await loadingTask.promise;

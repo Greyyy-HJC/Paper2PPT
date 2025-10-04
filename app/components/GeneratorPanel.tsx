@@ -5,19 +5,62 @@ import type { GeneratedDeck } from '@/lib/types';
 import { generateStaticDeck } from '@/lib/static/staticGenerator';
 
 type Mode = 'static' | 'llm';
+type Provider = 'openai' | 'anthropic' | 'azure' | 'deepseek' | 'custom';
 
-const PROVIDER_LABELS: Record<string, string> = {
-  openai: 'OpenAI-Compatible',
-  anthropic: 'Anthropic',
-  azure: 'Azure OpenAI',
-  custom: 'Custom Endpoint',
-};
+interface ProviderConfig {
+  label: string;
+  defaultBaseUrl?: string;
+  models: { value: string; label: string }[];
+  helper?: string;
+}
 
-const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = {
-  openai: 'gpt-4o-mini',
-  anthropic: 'claude-3-sonnet-20240229',
-  azure: 'gpt-4o-mini',
-  custom: 'gpt-4o-mini',
+const PROVIDER_CONFIG: Record<Provider, ProviderConfig> = {
+  openai: {
+    label: 'OpenAI / 兼容接口',
+    defaultBaseUrl: 'https://api.openai.com/v1',
+    models: [
+      { value: 'gpt-4o', label: 'gpt-4o (2024)' },
+      { value: 'gpt-4o-mini', label: 'gpt-4o-mini (高性价比)' },
+      { value: 'gpt-4.1', label: 'gpt-4.1' },
+      { value: 'gpt-4.1-mini', label: 'gpt-4.1-mini' },
+      { value: 'o1', label: 'o1 (推理)' },
+      { value: 'o1-mini', label: 'o1-mini' },
+    ],
+  },
+  anthropic: {
+    label: 'Anthropic Claude',
+    defaultBaseUrl: 'https://api.anthropic.com/v1',
+    models: [
+      { value: 'claude-3.5-sonnet-20240620', label: 'Claude 3.5 Sonnet (2024-06-20)' },
+      { value: 'claude-3.5-haiku-20240620', label: 'Claude 3.5 Haiku (2024-06-20)' },
+      { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus (2024-02-29)' },
+      { value: 'claude-3-sonnet-20240229', label: 'Claude 3 Sonnet (2024-02-29)' },
+    ],
+    helper: 'Anthropic 需传 x-api-key 且会自动添加 anthropic-version: 2023-06-01',
+  },
+  azure: {
+    label: 'Azure OpenAI',
+    defaultBaseUrl: 'https://{your-resource-name}.openai.azure.com/openai',
+    models: [
+      { value: 'gpt-4o', label: 'gpt-4o (deployment name)' },
+      { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+      { value: 'gpt-35-turbo', label: 'gpt-35-turbo' },
+    ],
+    helper: 'Azure 需在 Base URL 中包含资源名，并在 URL 查询参数附加 api-version',
+  },
+  deepseek: {
+    label: 'DeepSeek',
+    defaultBaseUrl: 'https://api.deepseek.com/v1',
+    models: [
+      { value: 'deepseek-chat', label: 'deepseek-chat (对话)' },
+      { value: 'deepseek-reasoner', label: 'deepseek-reasoner (推理)' },
+    ],
+  },
+  custom: {
+    label: '自定义兼容接口',
+    models: [],
+    helper: '完全自定义的 OpenAI-Compatible 服务，可自由填写 Base URL 与模型名',
+  },
 };
 
 const CARD_CLASSES =
@@ -58,8 +101,9 @@ export default function GeneratorPanel() {
   const [mode, setMode] = useState<Mode>('static');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [targetSlides, setTargetSlides] = useState(12);
-  const [provider, setProvider] = useState<'openai' | 'anthropic' | 'azure' | 'custom'>('openai');
-  const [model, setModel] = useState(DEFAULT_MODEL_BY_PROVIDER.openai);
+  const [provider, setProvider] = useState<Provider>('openai');
+  const [model, setModel] = useState<string>(PROVIDER_CONFIG.openai.models[0]?.value ?? '');
+  const [isCustomModel, setIsCustomModel] = useState<boolean>(PROVIDER_CONFIG.openai.models.length === 0);
   const [apiKey, setApiKey] = usePersistentState('paper2ppt-api-key', '');
   const [apiBaseUrl, setApiBaseUrl] = usePersistentState('paper2ppt-api-base', 'https://api.openai.com/v1');
 
@@ -79,8 +123,21 @@ export default function GeneratorPanel() {
   }, [downloadUrl]);
 
   useEffect(() => {
-    setModel(DEFAULT_MODEL_BY_PROVIDER[provider] ?? 'gpt-4o-mini');
-  }, [provider]);
+    const config = PROVIDER_CONFIG[provider];
+    if (config.models.length > 0) {
+      setIsCustomModel(false);
+      setModel(config.models[0]?.value ?? '');
+    } else {
+      setIsCustomModel(true);
+      setModel('');
+    }
+
+    if (typeof config.defaultBaseUrl === 'string') {
+      setApiBaseUrl(config.defaultBaseUrl);
+    }
+  }, [provider, setApiBaseUrl]);
+
+  const providerConfig = PROVIDER_CONFIG[provider];
 
   const outlinePreview = useMemo(() => deck?.outline ?? [], [deck]);
 
@@ -136,6 +193,14 @@ export default function GeneratorPanel() {
       setErrorMessage('请输入有效的大模型 API Key。');
       return;
     }
+    if (!model.trim()) {
+      setErrorMessage('请选择或填写模型名称。');
+      return;
+    }
+    if (!apiBaseUrl.trim()) {
+      setErrorMessage('请填写 API Base URL。');
+      return;
+    }
 
     setIsGenerating(true);
     setStatusMessage('调用大模型生成摘要与幻灯片结构…');
@@ -187,6 +252,20 @@ export default function GeneratorPanel() {
       setIsGenerating(false);
     }
   }, [pdfFile, apiKey, provider, model, apiBaseUrl, targetSlides, downloadUrl]);
+
+  const handleModelPresetChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      const value = event.target.value;
+      if (value === '__custom__') {
+        setIsCustomModel(true);
+        setModel('');
+        return;
+      }
+      setIsCustomModel(false);
+      setModel(value);
+    },
+    [],
+  );
 
   const handleGenerate = useCallback(async () => {
     if (mode === 'static') {
@@ -289,15 +368,18 @@ export default function GeneratorPanel() {
                   <span>模型服务提供商</span>
                   <select
                     value={provider}
-                    onChange={(event) => setProvider(event.target.value as typeof provider)}
+                    onChange={(event) => setProvider(event.target.value as Provider)}
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
                   >
-                    {Object.entries(PROVIDER_LABELS).map(([value, label]) => (
+                    {Object.entries(PROVIDER_CONFIG).map(([value, config]) => (
                       <option key={value} value={value}>
-                        {label}
+                        {config.label}
                       </option>
                     ))}
                   </select>
+                  {providerConfig.helper && (
+                    <span className="block text-xs text-slate-400">{providerConfig.helper}</span>
+                  )}
                 </label>
 
                 <label className="block space-y-2 text-sm text-slate-600">
@@ -312,15 +394,42 @@ export default function GeneratorPanel() {
                   <span className="text-xs text-slate-400">保存在浏览器 LocalStorage，仅用于当前机器。</span>
                 </label>
 
-                <label className="block space-y-2 text-sm text-slate-600">
-                  <span>模型名称</span>
-                  <input
-                    type="text"
-                    value={model}
-                    onChange={(event) => setModel(event.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-                  />
-                </label>
+                <div className="space-y-2 text-sm text-slate-600">
+                  <span className="block">模型</span>
+                  {providerConfig.models.length > 0 ? (
+                    <>
+                      <select
+                        value={isCustomModel ? '__custom__' : model}
+                        onChange={handleModelPresetChange}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+                      >
+                        {providerConfig.models.map((item) => (
+                          <option key={item.value} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                        <option value="__custom__">自定义模型…</option>
+                      </select>
+                      {isCustomModel && (
+                        <input
+                          type="text"
+                          value={model}
+                          onChange={(event) => setModel(event.target.value)}
+                          placeholder="输入自定义模型名称"
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+                        />
+                      )}
+                    </>
+                  ) : (
+                    <input
+                      type="text"
+                      value={model}
+                      onChange={(event) => setModel(event.target.value)}
+                      placeholder="输入模型名称"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
+                    />
+                  )}
+                </div>
 
                 <label className="block space-y-2 text-sm text-slate-600">
                   <span>API Base URL</span>
@@ -328,6 +437,7 @@ export default function GeneratorPanel() {
                     type="text"
                     value={apiBaseUrl}
                     onChange={(event) => setApiBaseUrl(event.target.value)}
+                    placeholder={providerConfig.defaultBaseUrl ?? 'https://...' }
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
                   />
                 </label>

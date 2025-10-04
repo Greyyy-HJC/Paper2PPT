@@ -6,7 +6,7 @@ interface LlmOptions {
   apiKey: string;
   apiBaseUrl: string;
   model: string;
-  provider: 'openai' | 'anthropic' | 'azure' | 'custom';
+  provider: 'openai' | 'anthropic' | 'azure' | 'deepseek' | 'custom';
   targetSlides: number;
 }
 
@@ -80,29 +80,79 @@ function buildPrompt({
   return { system, user };
 }
 
-async function callChatCompletions({
-  apiKey,
-  apiBaseUrl,
-  model,
-  messages,
-}: {
+async function callProviderChat(options: {
+  provider: LlmOptions['provider'];
   apiKey: string;
   apiBaseUrl: string;
   model: string;
-  messages: { role: 'system' | 'user'; content: string }[];
+  systemPrompt: string;
+  userPrompt: string;
 }): Promise<string> {
-  const endpoint = buildEndpoint(apiBaseUrl);
+  const { provider, apiKey, apiBaseUrl, model, systemPrompt, userPrompt } = options;
+  const trimmedBase = apiBaseUrl.trim().replace(/\/$/, '');
+
+  if (provider === 'anthropic') {
+    const endpoint = `${trimmedBase}/messages`;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_output_tokens: 2048,
+        system: systemPrompt,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: userPrompt,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Anthropic request failed: ${response.status} ${errorBody}`);
+    }
+
+    const payload = await response.json();
+    const content = payload?.content?.[0]?.text;
+    if (typeof content !== 'string' || content.trim().length === 0) {
+      throw new Error('Anthropic response missing content.');
+    }
+    return content;
+  }
+
+  const endpoint = buildEndpoint(trimmedBase);
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (provider === 'azure') {
+    headers['api-key'] = apiKey;
+  } else {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
   const response = await fetch(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers,
     body: JSON.stringify({
       model,
       temperature: 0.4,
       response_format: { type: 'json_object' },
-      messages,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
     }),
   });
 
@@ -160,14 +210,13 @@ export async function generateDeckWithLlm(
   });
 
   try {
-    const content = await callChatCompletions({
+    const content = await callProviderChat({
+      provider: options.provider,
       apiKey: options.apiKey,
       apiBaseUrl: options.apiBaseUrl,
       model: options.model,
-      messages: [
-        { role: 'system', content: prompt.system },
-        { role: 'user', content: prompt.user },
-      ],
+      systemPrompt: prompt.system,
+      userPrompt: prompt.user,
     });
 
     const parsed = JSON.parse(content) as LlmResponsePayload;

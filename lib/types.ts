@@ -40,7 +40,7 @@ export interface GeneratedDeck {
 export interface GenerateRequestOptions {
   targetSlides?: number;
   mode: 'static' | 'llm';
-  provider?: 'openai' | 'azure' | 'anthropic' | 'custom';
+  provider?: 'openai' | 'azure' | 'anthropic' | 'deepseek' | 'custom';
   apiKey?: string;
   apiBaseUrl?: string;
   model?: string;
