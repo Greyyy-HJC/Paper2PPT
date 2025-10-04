@@ -6,6 +6,10 @@
   color-scheme: light;
 }
 
+body {
+  @apply bg-gradient-to-b from-[#EEF2F9] via-[#F8F9FB] to-[#E6EBF6] font-sans text-slate-900 antialiased;
+}
+
 a {
   @apply text-[#0F8EF2];
 }
