@@ -10,6 +10,7 @@ interface LlmOptions {
   provider: 'openai' | 'anthropic' | 'azure' | 'deepseek' | 'custom';
   targetSlides: number;
   prompt?: string;
+  imagePrompt?: string;
 }
 
 interface LlmSlidePayload {
@@ -42,6 +43,7 @@ function buildPrompt({
   sentences,
   targetSlides,
   instruction,
+  imagePrompt,
 }: {
   baseMetadata: {
     title: string;
@@ -52,6 +54,7 @@ function buildPrompt({
   sentences: string[];
   targetSlides: number;
   instruction?: string;
+  imagePrompt?: string;
 }): { system: string; user: string } {
   const keySentences = sentences.slice(0, 18).map((sentence, index) => `${index + 1}. ${truncateSentence(sentence, 200)}`);
   const context = keySentences.join('\n');
@@ -87,6 +90,10 @@ function buildPrompt({
     : DEFAULT_LLM_PROMPT;
 
   systemParts.push('Guidance for content and style:', mergedInstruction);
+
+  if (imagePrompt && imagePrompt.trim().length > 0) {
+    systemParts.push('Image placement guidance:', imagePrompt.trim());
+  }
 
   const system = systemParts.join(' ');
 
@@ -225,6 +232,7 @@ export async function generateDeckWithLlm(
     sentences: baseline.sentences,
     targetSlides: options.targetSlides,
     instruction: options.prompt,
+    imagePrompt: options.imagePrompt,
   });
 
   try {

@@ -12,6 +12,13 @@ import { generateStaticDeck } from '@/lib/static/staticGenerator';
 type Mode = 'static' | 'llm';
 type Provider = 'openai' | 'anthropic' | 'azure' | 'deepseek' | 'custom';
 
+interface FigureUpload {
+  id: string;
+  file: File;
+  filename: string;
+  caption: string;
+}
+
 interface ProviderConfig {
   label: string;
   defaultBaseUrl?: string;
@@ -112,6 +119,7 @@ export default function GeneratorPanel() {
   const [apiKey, setApiKey] = usePersistentState('paper2ppt-api-key', '');
   const [apiBaseUrl, setApiBaseUrl] = usePersistentState('paper2ppt-api-base', 'https://api.openai.com/v1');
   const [prompt, setPrompt] = usePersistentState('paper2ppt-custom-prompt', DEFAULT_LLM_PROMPT);
+  const [figureUploads, setFigureUploads] = useState<FigureUpload[]>([]);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
@@ -217,20 +225,47 @@ export default function GeneratorPanel() {
       const baselineAnalysis = analyzePaper(extracted, targetSlides);
 
       const figureAssets = await extractFigureImages(pdfFile, baselineAnalysis.figures ?? []);
-      const figureDescriptors = figureAssets.map((asset) => ({
+      const autoDescriptors = figureAssets.map((asset) => ({
         id: asset.id,
         filename: asset.filename,
         caption: asset.caption,
       }));
 
+      const userDescriptors = figureUploads.map((upload, index) => ({
+        id: upload.id,
+        filename: upload.filename,
+        caption: upload.caption,
+        order: index,
+      }));
+
       if (baselineAnalysis.figures) {
         baselineAnalysis.figures = baselineAnalysis.figures.map((figure) => {
-          const match = figureDescriptors.find((descriptor) => descriptor.id === figure.id);
+          const match = autoDescriptors.find((descriptor) => descriptor.id === figure.id);
           return match ? { ...figure, filename: match.filename } : figure;
         });
       }
 
-      const slidesWithFigures = applyFigureAssetsToSlides(baselineAnalysis.slides, figureDescriptors);
+      const userFigureSummaries = userDescriptors.map((descriptor) => ({
+        id: descriptor.id,
+        pageIndex: 0,
+        caption: descriptor.caption,
+        title: descriptor.caption || descriptor.filename,
+        section: 'Figures',
+        subsection: descriptor.caption || descriptor.filename,
+        filename: descriptor.filename,
+      }));
+
+      baselineAnalysis.figures = [
+        ...(baselineAnalysis.figures ?? []),
+        ...userFigureSummaries,
+      ];
+
+      const combinedDescriptors = [
+        ...autoDescriptors,
+        ...userDescriptors,
+      ].map(({ id, filename, caption }) => ({ id, filename, caption }));
+
+      const slidesWithFigures = applyFigureAssetsToSlides(baselineAnalysis.slides, combinedDescriptors);
       baselineAnalysis.slides = slidesWithFigures;
 
       const baselinePayload = JSON.stringify(baselineAnalysis);
@@ -250,9 +285,14 @@ export default function GeneratorPanel() {
       formData.append('targetSlides', String(targetSlides));
       formData.append('file', pdfFile);
       formData.append('baseline', baselinePayload);
-      formData.append('figureMeta', JSON.stringify(figureDescriptors));
+      formData.append('figureMeta', JSON.stringify(baselineAnalysis.figures ?? []));
+      formData.append('figUploadsMeta', JSON.stringify(userDescriptors.map(({ id, filename, caption }) => ({ id, filename, caption }))));
+
       figureAssets.forEach((asset) => {
         formData.append('figures', asset.blob, asset.filename);
+      });
+      figureUploads.forEach((upload) => {
+        formData.append('figUploads', upload.file, upload.filename);
       });
       formData.append('prompt', prompt);
 
@@ -294,7 +334,7 @@ export default function GeneratorPanel() {
     } finally {
       setIsGenerating(false);
     }
-  }, [pdfFile, apiKey, provider, model, apiBaseUrl, targetSlides, prompt, downloadUrl]);
+  }, [pdfFile, apiKey, provider, model, apiBaseUrl, targetSlides, prompt, downloadUrl, figureUploads]);
 
   const handleModelPresetChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -309,6 +349,29 @@ export default function GeneratorPanel() {
     },
     [],
   );
+
+  const handleFigureFilesChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+    const nextUploads: FigureUpload[] = Array.from(files).map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      filename: `${Date.now()}-${file.name.replace(/\s+/g, '_')}`,
+      caption: '',
+    }));
+    setFigureUploads((prev) => [...prev, ...nextUploads]);
+    event.target.value = '';
+  }, []);
+
+  const handleFigureCaptionChange = useCallback((id: string, caption: string) => {
+    setFigureUploads((prev) => prev.map((upload) => (upload.id === id ? { ...upload, caption } : upload)));
+  }, []);
+
+  const handleRemoveFigureUpload = useCallback((id: string) => {
+    setFigureUploads((prev) => prev.filter((upload) => upload.id !== id));
+  }, []);
 
   const handleGenerate = useCallback(async () => {
     if (mode === 'static') {
@@ -505,6 +568,55 @@ export default function GeneratorPanel() {
                     默认提示词会引导模型解释概念、覆盖方法与结果，你也可以在此基础上追加或修改要求。
                   </span>
                 </label>
+
+                <div className="space-y-2 text-sm text-slate-600">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-700">附加配图（可选）</span>
+                    <label className="inline-flex cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300">
+                      上传图片
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={handleFigureFilesChange}
+                      />
+                    </label>
+                  </div>
+                  <span className="text-xs text-slate-400">
+                    图片将打包到 ZIP 的 `figuras/` 目录，并在 LLM 输出的 LaTeX 中引用；建议提前裁剪为幻灯片适合的尺寸。
+                  </span>
+                  {figureUploads.length > 0 && (
+                    <div className="space-y-2">
+                      {figureUploads.map((upload, index) => (
+                        <div
+                          key={upload.id}
+                          className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-sm"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-slate-700">
+                              图片 {index + 1}: {upload.filename}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveFigureUpload(upload.id)}
+                              className="text-xs font-semibold text-slate-400 transition hover:text-red-500"
+                            >
+                              移除
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            value={upload.caption}
+                            onChange={(event) => handleFigureCaptionChange(upload.id, event.target.value)}
+                            placeholder="为该图片填写一句话描述，帮助模型理解与引用"
+                            className="mt-2 w-full rounded-lg border border-slate-200 px-2 py-1 text-sm text-slate-700 focus:border-slate-400 focus:outline-none"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </>
             ) : (
               <div className="space-y-2 text-sm text-slate-600">

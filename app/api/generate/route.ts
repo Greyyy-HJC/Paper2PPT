@@ -20,6 +20,21 @@ function parseTargetSlides(value: FormDataEntryValue | null): number {
   return 12;
 }
 
+function buildImagePrompt(descriptors: { id: string; filename: string; caption?: string }[]): string | undefined {
+  if (descriptors.length === 0) {
+    return undefined;
+  }
+  const lines = descriptors.map((descriptor, index) => {
+    const caption = descriptor.caption ? ` - ${descriptor.caption}` : '';
+    return `${index + 1}. figuras/${descriptor.filename}${caption}`;
+  });
+  lines.push(
+    'For each referenced image, insert a LaTeX figure block using the provided filename (e.g., \\includegraphics[width=0.85\\textwidth]{figuras/filename}).',
+    'Explain why the image is relevant in the surrounding bullets or notes.',
+  );
+  return lines.join(' ');
+}
+
 export async function POST(request: Request) {
   try {
     const authHeader = request.headers.get('authorization');
@@ -39,6 +54,7 @@ export async function POST(request: Request) {
     const prompt = (formData.get('prompt') as string) ?? '';
     const baselineRaw = formData.get('baseline');
     const figureMetaRaw = formData.get('figureMeta');
+    const figureUploadMetaRaw = formData.get('figUploadsMeta');
     let baselineFromClient: AnalysisResult | null = null;
     if (typeof baselineRaw === 'string' && baselineRaw.trim().length > 0) {
       try {
@@ -57,9 +73,30 @@ export async function POST(request: Request) {
       }
     }
 
+    if (typeof figureUploadMetaRaw === 'string' && figureUploadMetaRaw.trim().length > 0) {
+      try {
+        const uploads = JSON.parse(figureUploadMetaRaw) as { id: string; filename: string; caption?: string }[];
+        figureDescriptors.push(...uploads);
+      } catch (error) {
+        console.warn('[Paper2PPT] Failed to parse figure upload meta', error);
+      }
+    }
+
+    figureDescriptors = figureDescriptors.filter((descriptor) => typeof descriptor.filename === 'string' && descriptor.filename.length > 0);
+    const seenFigureIds = new Set<string>();
+    figureDescriptors = figureDescriptors.filter((descriptor) => {
+      const key = descriptor.id || descriptor.filename;
+      if (seenFigureIds.has(key)) {
+        return false;
+      }
+      seenFigureIds.add(key);
+      return true;
+    });
+
     const figureFiles = formData.getAll('figures').filter((item): item is File => item instanceof File);
+    const figureUploadFiles = formData.getAll('figUploads').filter((item): item is File => item instanceof File);
     const figureFileMap = new Map<string, File>();
-    figureFiles.forEach((file) => {
+    [...figureFiles, ...figureUploadFiles].forEach((file) => {
       figureFileMap.set(file.name, file);
     });
 
@@ -95,6 +132,8 @@ export async function POST(request: Request) {
 
       const baselineForLlm = await ensureBaseline();
 
+      const imagePrompt = buildImagePrompt(figureDescriptors);
+
       const llmDeck = await generateDeckWithLlm(baselineForLlm, {
         apiKey,
         apiBaseUrl,
@@ -102,6 +141,7 @@ export async function POST(request: Request) {
         provider: normalizedProvider,
         targetSlides,
         prompt,
+        imagePrompt,
       });
 
       deckData = {

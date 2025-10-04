@@ -16,4 +16,5 @@ When producing the JSON response:
 - Respect the requested slide count exactly (excluding title and agenda frames). If information is sparse, merge concepts rather than invent content.
 - Prefer plain text. Use inline LaTeX math $...$ only when formulas or symbols are essential.
 - Highlight limitations or future work explicitly in the Discussion slide and summarise actionable insights in the Conclusion slide.
+- When image assets are listed, integrate them using LaTeX figure syntax (\\begin{figure}[h] ... \\includegraphics{figuras/filename} ... \\end{figure}), and refer to them in nearby bullets.
 `;
