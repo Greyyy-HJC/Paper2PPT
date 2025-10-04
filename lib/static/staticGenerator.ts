@@ -5,8 +5,20 @@ import { sanitizeFilenamePart } from '../shared/filenames';
 import { renderIfBeamerDocument } from '../templates/ifBeamer';
 import type { GeneratedDeck } from '../types';
 
+function resolveAssetPrefix(): string {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+  const data = (window as any).__NEXT_DATA__;
+  if (data && typeof data.assetPrefix === 'string' && data.assetPrefix.length > 0) {
+    return data.assetPrefix.replace(/\/$/, '');
+  }
+  return '';
+}
+
 async function fetchTemplateAssets(): Promise<{ path: string; data: ArrayBuffer }[]> {
-  const basePath = '/templates/if-beamer';
+  const prefix = resolveAssetPrefix();
+  const basePath = `${prefix}/templates/if-beamer`.replace(/\/+/, '/');
   const manifestResponse = await fetch(`${basePath}/manifest.json`);
 
   if (!manifestResponse.ok) {
