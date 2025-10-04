@@ -55,7 +55,9 @@ export async function extractPdf(input: PdfInput): Promise<ExtractedPdf> {
   if (isBrowser) {
     try {
       const assetPrefix = resolveAssetPrefix();
-      const workerSrc = `${assetPrefix}/pdf.worker.min.js`;
+      const workerSrc = assetPrefix
+        ? `${assetPrefix.replace(/\/$/, '')}/pdf.worker.min.js`
+        : './pdf.worker.min.js';
       (pdfjs as any).GlobalWorkerOptions.workerSrc = workerSrc;
     } catch (error) {
       // ignore worker assignment errors; pdfjs will fall back to fake worker
