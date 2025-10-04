@@ -1,4 +1,4 @@
-import { rmSync, existsSync, mkdirSync, cpSync } from 'node:fs';
+import { rmSync, existsSync, mkdirSync, cpSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const outDir = join(process.cwd(), 'out');
@@ -14,5 +14,8 @@ if (existsSync(docsDir)) {
 
 mkdirSync(docsDir, { recursive: true });
 cpSync(outDir, docsDir, { recursive: true });
+
+writeFileSync(join(docsDir, '.nojekyll'), '');
+writeFileSync(join(docsDir, '_config.yml'), "include: ['.nojekyll']\nstatic_files: []\n");
 
 console.log('Copied static export to ./docs for GitHub Pages.');
