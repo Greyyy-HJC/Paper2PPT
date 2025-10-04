@@ -34,14 +34,33 @@ async function toArrayBuffer(input: PdfInput): Promise<ArrayBuffer> {
   throw new Error('Unsupported PDF source input.');
 }
 
+function resolveAssetPrefix(): string {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+  const data = (window as any).__NEXT_DATA__;
+  if (data && typeof data.assetPrefix === 'string' && data.assetPrefix.length > 0) {
+    return data.assetPrefix.replace(/\/$/, '');
+  }
+  return '';
+}
+
 export async function extractPdf(input: PdfInput): Promise<ExtractedPdf> {
   const arrayBuffer = await toArrayBuffer(input);
   const data = new Uint8Array(arrayBuffer);
   const pdfjs = await import('pdfjs-dist/build/pdf');
 
+  try {
+    const assetPrefix = resolveAssetPrefix();
+    const workerSrc = `${assetPrefix}/pdf.worker.min.js`;
+    (pdfjs as any).GlobalWorkerOptions.workerSrc = workerSrc;
+  } catch (error) {
+    // ignore worker assignment errors; pdfjs will fall back to fake worker
+  }
+
   const loadingTask = pdfjs.getDocument({
     data,
-    disableWorker: true,
+    disableWorker: typeof Worker === 'undefined',
     useSystemFonts: true,
   } as any);
   const doc = await loadingTask.promise;
