@@ -365,7 +365,7 @@ export default function GeneratorPanel() {
                 onChange={handleFileChange}
               />
               <p className="text-base font-medium text-slate-800">
-                {pdfFile ? pdfFile.name : '拖拽或点击上传论文 PDF'}
+                {pdfFile ? pdfFile.name : '点击上传论文 PDF'}
               </p>
               <p className="mt-2 text-xs text-slate-500">
                 文件仅在浏览器中处理，不会上传至服务器（除非启用 LLM 模式）。

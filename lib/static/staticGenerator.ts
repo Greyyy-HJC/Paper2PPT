@@ -18,7 +18,10 @@ function resolveAssetPrefix(): string {
 
 async function fetchTemplateAssets(): Promise<{ path: string; data: ArrayBuffer }[]> {
   const prefix = resolveAssetPrefix();
-  const basePath = `${prefix}/templates/if-beamer`.replace(/\/+/, '/');
+  const normalizedPrefix = prefix.replace(/\/$/, '');
+  const basePath = normalizedPrefix
+    ? `${normalizedPrefix}/templates/if-beamer`
+    : './templates/if-beamer';
   const manifestResponse = await fetch(`${basePath}/manifest.json`);
 
   if (!manifestResponse.ok) {
