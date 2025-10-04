@@ -1,0 +1,9 @@
+{
+  "name": "IF-Beamer",
+  "version": "1.0.1",
+  "description": "IF-Beamer presentation template adapted for UTFPR Curitiba.",
+  "assets": [
+    "if-beamer.cls",
+    "figuras/logoPPGCA.png"
+  ]
+}
