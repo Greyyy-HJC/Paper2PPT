@@ -25,7 +25,11 @@ npm run dev
 ```bash
 npm run build:static
 ```
-编译后的静态站点会放在 `out/` 目录，可用于部署 GitHub Pages。静态构建默认隐藏 LLM 模式入口。
+编译后的静态站点会放在 `out/` 目录。若部署到 GitHub Pages，可执行：
+```bash
+npm run build:pages
+```
+该命令会自动将静态资源复制到 `docs/` 目录，并禁用页面上的 LLM 模式入口。
 
 ## 目录结构
 ```
@@ -36,7 +40,7 @@ npm run build:static
 ├── lib/
 │   ├── core/analyzer.ts               # PDF 启发式分析 + slide 结构
 │   ├── pdf/extract.ts                 # 基于 pdfjs-dist 的文本抽取
-│   ├── server/llm.ts                  # 多家模型接口适配
+│   ├── server/llm.ts                  # 多家模型接口适配（含可定制提示词）
 │   ├── static/staticGenerator.ts      # 静态模式生成与打包
 │   └── templates/ifBeamer.ts          # LaTeX 渲染
 ├── public/templates/if-beamer/        # IF-Beamer 主题资源
@@ -54,7 +58,7 @@ npm run build:static
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat`, `deepseek-reasoner` |
 | 自定义兼容接口 | 自填 | 任意遵循 OpenAI Chat Completions 的模型标识 |
 
-前端会根据选择自动切换模型列表，并在必要时添加额外请求头（如 `x-api-key`, `anthropic-version`, `api-key` 等）。
+前端会根据选择自动切换模型列表，并在必要时添加额外请求头（如 `x-api-key`, `anthropic-version`, `api-key` 等）。还提供“提示词”文本框，可在默认模板基础上自定义生成策略。
 
 ## 常见问题
 - **LLM 模式耗时？** 解析和调用均在本地触发，若网络较慢建议先使用静态模式生成初稿。

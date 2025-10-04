@@ -452,6 +452,7 @@ export function analyzePaper(
       id: 'authors-slide',
       title: '作者与机构',
       section: 'Introduction',
+      subsection: '作者与机构',
       blocks: [
         {
           kind: 'bullets',
@@ -466,6 +467,7 @@ export function analyzePaper(
       id: 'keywords-slide',
       title: '关键术语',
       section: 'Introduction',
+      subsection: '关键术语',
       blocks: [
         {
           kind: 'bullets',
@@ -480,6 +482,7 @@ export function analyzePaper(
       id: 'abstract-slide',
       title: '摘要概览',
       section: 'Introduction',
+      subsection: '摘要概览',
       blocks: [
         {
           kind: 'bullets',
@@ -496,9 +499,12 @@ export function analyzePaper(
     });
   }
 
-  const targetContentSlides = Math.max(3, Math.min(targetSlides - 3, 12));
-  const leadingSlidesCount = slides.length;
-  const remainingSectionSlots = Math.max(1, targetContentSlides - leadingSlidesCount);
+  const maxContentSlides = Math.max(3, Math.min(targetSlides - 2, 15));
+  const availableCoreSlots = Math.max(1, maxContentSlides - 1);
+  if (slides.length > availableCoreSlots) {
+    slides.splice(availableCoreSlots);
+  }
+  const remainingSectionSlots = Math.max(0, availableCoreSlots - slides.length);
   const sectionHeadings = outline.length > 0
     ? outline.slice(0, Math.min(outline.length, remainingSectionSlots))
     : FALLBACK_OUTLINE.slice(0, remainingSectionSlots);
@@ -516,6 +522,7 @@ export function analyzePaper(
       id: `section-${index + 1}`,
       title: heading,
       section: heading,
+      subsection: heading,
       blocks: [
         {
           kind: 'bullets',
@@ -525,8 +532,46 @@ export function analyzePaper(
     });
   });
 
+  while (slides.length < availableCoreSlots && generalSentenceQueue.length > 0) {
+    const items = generalSentenceQueue.splice(0, 4);
+    if (items.length === 0) {
+      break;
+    }
+    slides.push({
+      id: `filler-${slides.length + 1}`,
+      title: '更多要点',
+      section: 'Discussion',
+      subsection: '更多要点',
+      blocks: [
+        {
+          kind: 'bullets',
+          items,
+        },
+      ],
+    });
+  }
+
+  while (slides.length < availableCoreSlots) {
+    slides.push({
+      id: `placeholder-${slides.length + 1}`,
+      title: '内容待补充',
+      section: 'Discussion',
+      subsection: '内容待补充',
+      blocks: [
+        {
+          kind: 'bullets',
+          items: ['(手动补充关键要点)'],
+        },
+      ],
+    });
+  }
+
   const closingSlide = buildClosingSlide(sentences);
-  slides.push(closingSlide);
+  const contentSlides = [...slides, closingSlide];
+
+  if (contentSlides.length > maxContentSlides) {
+    contentSlides.splice(maxContentSlides);
+  }
 
   const metadata: DeckMetadata = {
     paperTitle,
@@ -534,8 +579,8 @@ export function analyzePaper(
     authors,
     generatedAt: new Date().toISOString(),
     mode: 'static',
-    slideCount: slides.length + 2,
+    slideCount: contentSlides.length + 2,
   };
 
-  return { metadata, outline, slides, sentences };
+  return { metadata, outline, slides: contentSlides, sentences };
 }

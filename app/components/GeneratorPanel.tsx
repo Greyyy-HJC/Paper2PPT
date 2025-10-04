@@ -340,6 +340,14 @@ export default function GeneratorPanel() {
                 LLM：需要个人 API Key
               </div>
             )}
+            <a
+              href="https://github.com/Greyyy-HJC/Paper2PPT"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center rounded-full border border-slate-200 px-2 py-1 font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+            >
+              GitHub 仓库
+            </a>
           </div>
         </div>
 

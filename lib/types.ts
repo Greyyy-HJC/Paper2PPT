@@ -17,6 +17,7 @@ export interface SlideContent {
   title: string;
   blocks: SlideBlock[];
   section?: string;
+  subsection?: string;
   notes?: string;
 }
 
